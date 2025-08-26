@@ -1,0 +1,16 @@
+{
+  "name": "weskit-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.1",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.13.0",
+    "weskit": "latest"
+  }
+}
