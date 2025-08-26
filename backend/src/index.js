@@ -18,8 +18,12 @@ const pool = new Pool({
   port: 5432,
 });
 
-// Multer setup for file uploads
-const upload = multer({ dest: '/home/keygen/genomic_data/' });
+// Multer setup for file uploads (project-relative)
+const uploadDir = path.join(__dirname, '..', 'uploads');
+const outputDir = path.join(__dirname, '..', 'results');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+const upload = multer({ dest: uploadDir });
 
 // API: Upload file
 app.post('/api/upload', upload.single('file'), async (req, res) => {
@@ -42,11 +46,17 @@ app.post('/api/run/:jobId', async (req, res) => {
 
   // Submit job to WESKit (example REST API usage)
   try {
+    const workflowPath = path.join(__dirname, '..', '..', 'nextflow', 'fastqc_subworkflow.nf');
+    const workflowConfig = path.join(__dirname, '..', '..', 'nextflow', 'nextflow.config');
     const weskitRes = await axios.post('http://localhost:8080/ga4gh/wes/v1/runs', {
-      workflow_url: '/home/keygen/weskit/fastqc_subworkflow.nf',
+      workflow_url: workflowPath,
       workflow_params: {
-        dataDir: path.dirname(filepath),
-        fastqFiles: filename
+        dataDir: uploadDir,
+        fastqFiles: filename,
+        outputDir: outputDir
+      },
+      workflow_engine_parameters: {
+        config: workflowConfig
       },
       tags: { jobId }
     });
@@ -83,10 +93,32 @@ app.get('/api/result/:jobId', async (req, res) => {
   if (!weskit_job_id) return res.status(404).send('No WESKit job for this upload');
   try {
     const weskitRes = await axios.get(`http://localhost:8080/ga4gh/wes/v1/runs/${weskit_job_id}/outputs`);
-    // Assume outputs contains URLs or file paths for HTML and ZIP
-    res.json({ outputs: weskitRes.data });
+    // Serve result files directly if available in outputDir
+    const outputs = weskitRes.data.outputs || [];
+    const files = outputs.map(out => {
+      const filePath = path.join(outputDir, out.name || out.path || '');
+      if (fs.existsSync(filePath)) {
+        return {
+          name: out.name || out.path,
+          url: `/api/download/${jobId}/${encodeURIComponent(out.name || out.path)}`
+        };
+      }
+      return null;
+    }).filter(Boolean);
+    res.json({ outputs: files });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch WESKit outputs', details: err.message });
+  }
+});
+
+// Serve result files for download
+app.get('/api/download/:jobId/:filename', async (req, res) => {
+  const { filename } = req.params;
+  const filePath = path.join(outputDir, filename);
+  if (fs.existsSync(filePath)) {
+    res.download(filePath);
+  } else {
+    res.status(404).send('File not found');
   }
 });
 
